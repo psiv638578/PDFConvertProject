@@ -1,144 +1,146 @@
-# gui/dialogs_list.py (проверенная версия, работающая с текущим проектом)
-
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
-    QPushButton, QCheckBox, QWidget, QHeaderView, QAbstractItemView,
-    QMessageBox
+    QDialog, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, QCheckBox,
+    QTableWidget, QTableWidgetItem, QAbstractItemView, QHeaderView
 )
 from PyQt5.QtCore import Qt
 import configparser
 import os
 
-
 class TaskListDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Список заданий")
-        self.setMinimumSize(800, 400)
+        self.setMinimumSize(600, 400)
 
-        self.ini_path = os.path.join(os.path.dirname(__file__), "..", "setup.ini")
-        self.config = configparser.ConfigParser()
-        self.config.optionxform = str
-        self.config.read(self.ini_path, encoding="utf-8")
+        self.result_numbering = False
+        self.result_skip_first_two = False
+        self.source_paths = []
 
-        self.project_name = self.config.get("global", "current_project", fallback=None)
-        if not self.project_name or not self.config.has_section(self.project_name):
-            QMessageBox.critical(self, "Ошибка", "Не выбран или не найден текущий проект в setup.ini")
-            self.reject()
-            return
+        layout = QVBoxLayout()
 
         self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["Файл", "Листы", "Конвертировать", "Объединять"])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setHorizontalHeaderLabels(["Файл", "Параметры", "Статус", "Объединять"])
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-
-        btn_up = QPushButton("Вверх")
-        btn_down = QPushButton("Вниз")
-        btn_delete = QPushButton("Удалить")
-        btn_ok = QPushButton("OK")
-        btn_cancel = QPushButton("Отмена")
-
-        btn_up.clicked.connect(self.move_up)
-        btn_down.clicked.connect(self.move_down)
-        btn_delete.clicked.connect(self.delete_row)
-        btn_ok.clicked.connect(self.save_and_close)
-        btn_cancel.clicked.connect(self.reject)
-
-        hbox = QHBoxLayout()
-        hbox.addWidget(btn_up)
-        hbox.addWidget(btn_down)
-        hbox.addWidget(btn_delete)
-        hbox.addStretch()
-        hbox.addWidget(btn_ok)
-        hbox.addWidget(btn_cancel)
-
-        layout = QVBoxLayout(self)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         layout.addWidget(self.table)
-        layout.addLayout(hbox)
 
-        self.load_data()
+        btn_layout = QHBoxLayout()
 
-    def load_data(self):
-        try:
-            self.table.setRowCount(0)
-            files = self.config.items(self.project_name)
-            source_items = [(k, v) for k, v in files if k.startswith("source_files_")]
-            sorted_files = sorted(source_items, key=lambda x: int(x[0].split("_")[-1]))
+        self.btn_up = QPushButton("Вверх")
+        self.btn_down = QPushButton("Вниз")
+        self.btn_delete = QPushButton("Удалить")
+        self.btn_ok = QPushButton("OK")
+        self.btn_cancel = QPushButton("Отмена")
 
-            for key, line in sorted_files:
-                parts = [p.strip() for p in line.split("|")]
-                file = parts[0] if len(parts) > 0 else ""
-                sheet = parts[1] if len(parts) > 1 else "-"
-                enabled = parts[2].lower() if len(parts) > 2 else "enabled"
-                merge = parts[3].lower() if len(parts) > 3 else "merge"
+        btn_layout.addWidget(self.btn_up)
+        btn_layout.addWidget(self.btn_down)
+        btn_layout.addWidget(self.btn_delete)
 
-                row = self.table.rowCount()
-                self.table.insertRow(row)
-                self.table.setItem(row, 0, QTableWidgetItem(file))
-                self.table.setItem(row, 1, QTableWidgetItem(sheet))
+        self.cb_numbering = QCheckBox("Нумеровать")
+        self.cb_from_third = QCheckBox("С 3 листа")
+        btn_layout.addWidget(self.cb_numbering)
+        btn_layout.addWidget(self.cb_from_third)
 
-                chk_enabled = QCheckBox()
-                chk_enabled.setChecked(enabled == "enabled")
-                self._set_checkbox(row, 2, chk_enabled)
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.btn_ok)
+        btn_layout.addWidget(self.btn_cancel)
 
-                chk_merge = QCheckBox()
-                chk_merge.setChecked(merge == "merge")
-                self._set_checkbox(row, 3, chk_merge)
+        layout.addLayout(btn_layout)
+        self.setLayout(layout)
 
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка в load_data", str(e))
+        self.load_from_ini()
+        self.update_checkbox_state()
+        self.table.itemChanged.connect(self.update_checkbox_state)
+        self.cb_numbering.stateChanged.connect(self.update_checkbox_state)
 
-    def _set_checkbox(self, row, col, checkbox):
-        container = QWidget()
-        layout = QHBoxLayout(container)
-        layout.addWidget(checkbox)
-        layout.setAlignment(Qt.AlignCenter)
-        layout.setContentsMargins(0, 0, 0, 0)
-        container.setLayout(layout)
-        self.table.setCellWidget(row, col, container)
+        self.btn_ok.clicked.connect(self.handle_accept)
+        self.btn_cancel.clicked.connect(self.reject)
 
-    def move_up(self):
-        row = self.table.currentRow()
-        if row > 0:
-            self._swap_rows(row, row - 1)
-            self.table.selectRow(row - 1)
+    def update_checkbox_state(self):
+        has_merge = False
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 3)
+            if item and item.checkState() == Qt.Checked:
+                has_merge = True
+                break
 
-    def move_down(self):
-        row = self.table.currentRow()
-        if row < self.table.rowCount() - 1:
-            self._swap_rows(row, row + 1)
-            self.table.selectRow(row + 1)
+        self.cb_numbering.setEnabled(has_merge)
+        self.cb_from_third.setEnabled(self.cb_numbering.isChecked() and self.cb_numbering.isEnabled())
 
-    def _swap_rows(self, i, j):
-        for col in range(2):
-            text_i = self.table.item(i, col).text()
-            text_j = self.table.item(j, col).text()
-            self.table.item(i, col).setText(text_j)
-            self.table.item(j, col).setText(text_i)
-        for col in [2, 3]:
-            chk_i = self.table.cellWidget(i, col).findChild(QCheckBox).isChecked()
-            chk_j = self.table.cellWidget(j, col).findChild(QCheckBox).isChecked()
-            self.table.cellWidget(i, col).findChild(QCheckBox).setChecked(chk_j)
-            self.table.cellWidget(j, col).findChild(QCheckBox).setChecked(chk_i)
+    def load_from_ini(self):
+        ini_path = os.path.join(os.getcwd(), "setup.ini")
+        if not os.path.exists(ini_path):
+            return
 
-    def delete_row(self):
-        row = self.table.currentRow()
-        if row >= 0:
-            self.table.removeRow(row)
+        config = configparser.ConfigParser()
+        config.optionxform = str
+        config.read(ini_path, encoding='utf-8')
 
-    def save_and_close(self):
-        self.config.remove_section(self.project_name)
-        self.config.add_section(self.project_name)
+        section = config.get("global", "current_project", fallback="files")
 
-        for i in range(self.table.rowCount()):
-            file = self.table.item(i, 0).text()
-            sheets = self.table.item(i, 1).text()
-            enabled = "enabled" if self.table.cellWidget(i, 2).findChild(QCheckBox).isChecked() else "disabled"
-            merge = "merge" if self.table.cellWidget(i, 3).findChild(QCheckBox).isChecked() else "merge not"
-            line = f"{file} | {sheets} | {enabled} | {merge}"
-            self.config.set(self.project_name, f"source_files_{i+1}", line)
+        self.cb_numbering.setChecked(config.get(section, "add_page_numbers", fallback="no").lower() == "yes")
+        self.cb_from_third.setChecked(config.get(section, "start_from_page3", fallback="no").lower() == "yes")
 
-        with open(self.ini_path, "w", encoding="utf-8") as f:
-            self.config.write(f)
+        if not config.has_section(section):
+            return
+
+        self.source_paths.clear()
+        rows = [(k, v) for k, v in config.items(section) if k.startswith("source_files_")]
+        rows.sort(key=lambda x: int(x[0].split("_")[-1]))
+
+        for key, line in rows:
+            parts = [p.strip() for p in line.split("|")]
+            if len(parts) < 4:
+                continue
+
+            path, param, status, merge = parts
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            self.source_paths.append(path)
+            self.table.setItem(row, 0, QTableWidgetItem(os.path.basename(path)))
+            self.table.setItem(row, 1, QTableWidgetItem(param))
+
+            chk_status = QTableWidgetItem()
+            chk_status.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            chk_status.setCheckState(Qt.Checked if status.lower() == "enabled" else Qt.Unchecked)
+            self.table.setItem(row, 2, chk_status)
+
+            chk_merge = QTableWidgetItem()
+            chk_merge.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            chk_merge.setCheckState(Qt.Checked if merge.lower() == "merge" else Qt.Unchecked)
+            self.table.setItem(row, 3, chk_merge)
+
+        self.update_checkbox_state()
+
+    def handle_accept(self):
+        self.result_numbering = self.cb_numbering.isChecked()
+        self.result_skip_first_two = self.cb_from_third.isChecked()
+
+        ini_path = os.path.join(os.getcwd(), "setup.ini")
+        config = configparser.ConfigParser()
+        config.optionxform = str
+        config.read(ini_path, encoding='utf-8')
+
+        section = config.get("global", "current_project", fallback="files")
+        if not config.has_section(section):
+            config.add_section(section)
+
+        config.set(section, "add_page_numbers", "yes" if self.result_numbering else "no")
+        config.set(section, "start_from_page3", "yes" if self.result_skip_first_two else "no")
+
+        for row in range(self.table.rowCount()):
+            path = self.source_paths[row] if row < len(self.source_paths) else ""
+            param = self.table.item(row, 1).text()
+            status_item = self.table.item(row, 2)
+            merge_item = self.table.item(row, 3)
+
+            status = "enabled" if status_item.checkState() == Qt.Checked else "disabled"
+            merge = "merge" if merge_item.checkState() == Qt.Checked else "merge not"
+
+            config.set(section, f"source_files_{row + 1}", f"{path} | {param} | {status} | {merge}")
+
+        with open(ini_path, "w", encoding='utf-8') as f:
+            config.write(f)
+
         self.accept()

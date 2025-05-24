@@ -21,7 +21,7 @@ from gui.dialogs_project import ProjectSelectDialog
 from gui.dialogs_list import TaskListDialog
 from gui.dialogs_excel import ExcelSheetsDialog
 from core.converter_runner import ConvertWorker
-
+from gui.dialogs_page_numbering import PageNumberingDialog
 
 class MainGui(QMainWindow):
     def __init__(self):
@@ -41,10 +41,6 @@ class MainGui(QMainWindow):
 
     def init_ui(self):
         self.create_menu()
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        layout = QVBoxLayout()
-        central_widget.setLayout(layout)
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -65,15 +61,48 @@ class MainGui(QMainWindow):
         btn_layout.addWidget(btn_start)
         btn_layout.addWidget(btn_cancel)
         layout.addLayout(btn_layout)
+        
+        # Прогресс       
+        self.progress = QProgressBar()
+        self.progress.setValue(0)
+        self.progress.setTextVisible(False)
+        self.reset_progress_style_to_background()  # 👈 применить стили
+        layout.addWidget(self.progress)
 
-        central_widget.setLayout(layout)
-
-        # Статус + прогресс
+        # Статус
         self.status = QStatusBar()
         self.setStatusBar(self.status)
-        self.progress = QProgressBar()
-        self.progress.setVisible(False)
-        self.status.addPermanentWidget(self.progress)
+        self.status.setStyleSheet("""
+            QStatusBar {
+                border: 1px solid #aaa;
+                margin: 2;
+                min-height: 19px;
+            }
+        """) 
+        central_widget.setLayout(layout)
+
+    def reset_progress_style_to_background(self):
+        bg_color = self.palette().color(self.backgroundRole()).name()
+        self.progress.setStyleSheet(f"""
+            QProgressBar {{
+                border: none;
+                background-color: {bg_color};
+            }}
+        """)
+
+    def set_progress_with_border(self):
+        self.progress.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #999;
+                border-radius: 3px;
+                background-color: white;
+            }
+            QProgressBar::chunk {
+                background-color: #3399ff;
+                width: 10px;
+            }
+        """)
+
 
     def create_menu(self):
         menubar = self.menuBar()
@@ -86,6 +115,11 @@ class MainGui(QMainWindow):
         file_menu.addAction("Папка сохранения PDF", self.select_output_folder)
         file_menu.addAction("Выбрать итоговый PDF", self.select_merged_pdf_path)
         file_menu.addAction("Изменить имя итогового PDF", self.change_merged_pdf_name)
+        file_menu.addSeparator()
+        # Пункт "Выбрать DOCX для нумерации"
+        action_numbering = QAction("Выбрать файлы DOCX для нумерация страниц...", self)
+        action_numbering.triggered.connect(self.open_page_numbering_dialog)
+        file_menu.addAction(action_numbering)        
         file_menu.addSeparator()
         file_menu.addAction("Выход", self.close)
 
@@ -222,6 +256,7 @@ class MainGui(QMainWindow):
     def start_conversion(self):
         self.progress.setVisible(True)
         self.progress.setValue(0)
+        self.set_progress_with_border()
         self.status.showMessage("Начинаем...")
 
         # Создание и запуск потока
@@ -237,8 +272,13 @@ class MainGui(QMainWindow):
         self.worker.start()
 
     def conversion_finished(self):
-        self.progress.setVisible(False)
+        self.progress.setValue(0)
+        self.progress.setTextVisible(False)
         self.status.showMessage("Конвертация завершена", 3000)
+        self.reset_progress_style_to_background()
+        self.progress.setTextVisible(False)
+        self.progress.setValue(0)
+
 
     def handle_status_message(self, text):
         if text.startswith("[BLOCKED]"):
@@ -246,6 +286,11 @@ class MainGui(QMainWindow):
             QMessageBox.critical(self, "Ошибка доступа", f"Файл «{filename}» заблокирован!\nВозможно, он открыт в другой программе.")
         else:
             self.status.showMessage(text, 5000)
+
+    def open_page_numbering_dialog(self):
+        from gui.dialogs_page_numbering import PageNumberingDialog
+        dialog = PageNumberingDialog(self)
+        dialog.exec_()
 
 def run_gui():
     app = QApplication([])
