@@ -4,7 +4,6 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt
 import os
-from core.page_numbering import number_docx_pages
 
 class PageNumberingDialog(QDialog):
     def __init__(self, parent=None):

@@ -13,6 +13,7 @@ class ConvertWorker(QThread):
     update_status = pyqtSignal(str)
     update_progress = pyqtSignal(int)
     done = pyqtSignal()
+    show_info = pyqtSignal(str)     # определение сигнала
 
     def __init__(self, ini_path):
         super().__init__()
@@ -26,7 +27,8 @@ class ConvertWorker(QThread):
 
         project_name = config.get("global", "current_project", fallback=None)
         if not project_name or not config.has_section(project_name):
-            self.update_status.emit("Не выбран текущий проект или секция не найдена.")
+            self.update_status.emit("Не выбран текущий проект или секция не найдена.")         
+            sleep(1.5)
             self.done.emit()
             return
 
@@ -36,6 +38,7 @@ class ConvertWorker(QThread):
         items = [(k, v) for k, v in section.items() if k.startswith("source_files_")]
         if not items:
             self.update_status.emit("Исходные файлы не указаны.")
+            sleep(1.5)
             self.done.emit()
             return
 
@@ -43,6 +46,7 @@ class ConvertWorker(QThread):
         output_folder = section.get("output_folder", "").strip()
         if not output_folder:
             self.update_status.emit("Папка сохранения ПДФ не указана.")
+            sleep(1.5)
             self.done.emit()
             return
 
@@ -53,16 +57,17 @@ class ConvertWorker(QThread):
         merged_pdf_path = section.get("merged_pdf_path", "").strip()
         has_merge = any("merge" in v.lower() for k, v in items)
 
-        if not merged_pdf_path:
-            if has_merge:
-                merged_pdf_path = os.path.join(output_folder, "Объединенный.pdf")
-                section["merged_pdf_path"] = merged_pdf_path
-                self.update_status.emit("Имя объединенного файла не указано. Объединенный ПДФ-файл будет сохранен под именем 'Объединенный'.")
-            else:
-                self.update_status.emit("Папка сохранения объединенного ПДФ не указана. Объединенный ПДФ-файл будет сохранен в папке вывода.")
+        if not merged_pdf_path and has_merge:
+            merged_pdf_path = os.path.join(output_folder, "Объединенный.pdf")
+            merged_pdf_path = merged_pdf_path.replace("\\", "/")  # <-- это и есть нужное исправление
+            config.set(project_name, "merged_pdf_path", merged_pdf_path)  # <== ВАЖНО
+            self.show_info.emit(
+                "Папка сохранения и имя объединенного ПДФ не указаны.\n"
+                "Объединенный ПДФ-файл будет сохранен в папке вывода под именем 'Объединенный'."
+            )
 
-        with open(self.ini_path, "w", encoding='utf-8') as f:
-            config.write(f)
+        with open(self.ini_path, "w", encoding="utf-8") as configfile:
+            config.write(configfile)
 
         self.update_status.emit(">>> Запуск метода run()")
         self.update_status.emit(">>> Запуск метода run()")
@@ -139,7 +144,7 @@ class ConvertWorker(QThread):
                 continue
 
             path, sheet, enabled, merge = parts
-            self.update_status.emit(f"Файл: {path}, enabled={enabled}, merge={merge}")
+#            self.update_status.emit(f"Файл: {path}, enabled={enabled}, merge={merge}")
 
             if enabled.lower() != "enabled":
                 continue
@@ -175,13 +180,16 @@ class ConvertWorker(QThread):
             except Exception as e:
                 self.update_status.emit(f"Ошибка при обработке: {e}")
 
+#            sleep(2)
+
             processed += 1
             percent = int((processed / total) * 100)
             self.update_progress.emit(percent)
             sleep(0.5)
 
-        merged_pdf_path = config.get(project_name, "merged_pdf_path", fallback=None)
-        self.update_status.emit(f"Файлы для объединения: {merged_list}")
+            merged_pdf_path = section.get("merged_pdf_path", "").strip()
+
+            self.update_status.emit(f"Файлы для объединения: {merged_list}")
 
         if merged_list and merged_pdf_path:
             try:
@@ -191,7 +199,7 @@ class ConvertWorker(QThread):
                         merger.append(pdf_file)
                 merger.write(merged_pdf_path)
                 merger.close()
-                self.update_status.emit(f"{os.path.basename(merged_pdf_path)} успешно сохранён.")
+                self.update_status.emit(f"{os.path.basename(merged_pdf_path)} сохранён.")
                 merged_created = True
             except Exception as e:
                 self.update_status.emit(f"Ошибка при объединении PDF: {e}")
@@ -211,6 +219,55 @@ class ConvertWorker(QThread):
             except Exception as e:
                 self.update_status.emit(f"Ошибка нумерации PDF: {e}")
 
+        # ✅ Завершающее сообщение
         self.update_status.emit("Конвертация завершена.")
         self.update_progress.emit(100)
         self.done.emit()
+
+    def try_remove_existing(self, path):       # Удаляет файл, если он существует, и логирует ошибку при неудаче.
+
+        if os.path.isfile(path):
+            try:
+                os.remove(path)
+            except Exception:
+                # Сообщаем о заблокированном файле
+                self.update_status.emit(f"[BLOCKED] {os.path.basename(path)}")
+                raise
+
+    def convert_docx(self, input_path, output_path):
+        self.try_remove_existing(output_path)
+        word = win32com.client.Dispatch("Word.Application")
+        word.Visible = False
+        doc = word.Documents.Open(input_path, ReadOnly=1)
+        doc.ExportAsFixedFormat(output_path, 17)
+        doc.Close(False)
+        word.Quit()
+        self.update_status.emit(f"{os.path.basename(input_path)} конвертирован.")
+
+    def convert_xlsx(self, input_path, output_path, sheet):
+        self.try_remove_existing(output_path)
+        excel = win32com.client.Dispatch("Excel.Application")
+        excel.Visible = False
+        wb = excel.Workbooks.Open(input_path)
+        if sheet != "-":
+            try:
+                ws = wb.Worksheets(sheet)
+                ws.Select()
+            except:
+                pass
+        wb.ExportAsFixedFormat(0, output_path)
+        wb.Close(False)
+        excel.Quit()
+        self.update_status.emit(f"{os.path.basename(input_path)} конвертирован.")
+
+    def convert_cdw_pdf2d(self, iConverter, input_path, output_path):
+        self.try_remove_existing(output_path)
+        result = iConverter.Convert(input_path, output_path, 0, False)
+        if result:
+            self.update_status.emit(f"{os.path.basename(input_path)} конвертирован.")
+        else:
+            self.update_status.emit(f"Ошибка при сохранении {os.path.basename(input_path)}.")
+
+    def copy_pdf(self, input_path, output_path):
+        self.try_remove_existing(output_path)
+        shutil.copyfile(input_path, output_path)

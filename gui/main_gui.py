@@ -26,7 +26,7 @@ from gui.dialogs_page_numbering import PageNumberingDialog
 class MainGui(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("PDFConvert GUI")
+        self.setWindowTitle("PDFConvert v1.2-beta")
         self.setMinimumSize(300, 150)
 
         self.ini_path = os.path.join(os.path.dirname(__file__), "..", "setup.ini")
@@ -268,6 +268,7 @@ class MainGui(QMainWindow):
         self.worker.update_status.connect(self.handle_status_message)
         self.worker.update_progress.connect(self.progress.setValue)
         self.worker.done.connect(self.conversion_finished)
+        self.worker.show_info.connect(self.show_info_dialog)
 
         self.worker.start()
 
@@ -291,6 +292,9 @@ class MainGui(QMainWindow):
         from gui.dialogs_page_numbering import PageNumberingDialog
         dialog = PageNumberingDialog(self)
         dialog.exec_()
+
+    def show_info_dialog(self, text):
+        QMessageBox.information(self, "Информация", text)
 
 def run_gui():
     app = QApplication([])

@@ -1,5 +1,3 @@
-# core/converter_runner.py (финальные версии всех convert_* с перезаписью и предупреждением)
-
 import os
 import configparser
 import shutil
@@ -8,19 +6,71 @@ from time import sleep
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtWidgets import QMessageBox
 from PyPDF2 import PdfMerger
-from core.add_page_numbers import add_page_numbers                                                  
+from core.add_page_numbers import add_page_numbers
 import win32com.client
 
 class ConvertWorker(QThread):
     update_status = pyqtSignal(str)
     update_progress = pyqtSignal(int)
     done = pyqtSignal()
+    show_info = pyqtSignal(str)     # определение сигнала
 
     def __init__(self, ini_path):
         super().__init__()
         self.ini_path = ini_path
 
     def run(self):
+        # >>> Проверка параметров до старта
+        config = configparser.ConfigParser()
+        config.optionxform = str
+        config.read(self.ini_path, encoding='utf-8')
+
+        project_name = config.get("global", "current_project", fallback=None)
+        if not project_name or not config.has_section(project_name):
+            self.update_status.emit("Не выбран текущий проект или секция не найдена.")         
+            sleep(1.5)
+            self.done.emit()
+            return
+
+        section = config[project_name]
+
+        # Проверка: исходные файлы заданы?
+        items = [(k, v) for k, v in section.items() if k.startswith("source_files_")]
+        if not items:
+            self.update_status.emit("Исходные файлы не указаны.")
+            sleep(1.5)
+            self.done.emit()
+            return
+
+        # Проверка: папка вывода PDF
+        output_folder = section.get("output_folder", "").strip()
+        if not output_folder:
+            self.update_status.emit("Папка сохранения ПДФ не указана.")
+            sleep(1.5)
+            self.done.emit()
+            return
+
+        if not os.path.exists(output_folder):
+            os.makedirs(output_folder)
+
+        # Проверка: путь объединенного PDF
+        merged_pdf_path = section.get("merged_pdf_path", "").strip()
+        has_merge = any("merge" in v.lower() for k, v in items)
+
+        if not merged_pdf_path and has_merge:
+            merged_pdf_path = os.path.join(output_folder, "Объединенный.pdf")
+            merged_pdf_path = merged_pdf_path.replace("\\", "/")  # <-- это и есть нужное исправление
+            config.set(project_name, "merged_pdf_path", merged_pdf_path)  # <== ВАЖНО
+            self.show_info.emit(
+                "Папка сохранения и имя объединенного ПДФ не указаны.\n"
+                "Объединенный ПДФ-файл будет сохранен в папке вывода под именем 'Объединенный'."
+            )
+
+        with open(self.ini_path, "w", encoding="utf-8") as configfile:
+            config.write(configfile)
+
+        self.update_status.emit(">>> Запуск метода run()")
+        self.update_status.emit(">>> Запуск метода run()")
 
         config = configparser.ConfigParser()
         config.optionxform = str
@@ -43,6 +93,21 @@ class ConvertWorker(QThread):
             key=lambda x: int(x[0].split('_')[-1])
         )
 
+        self.update_status.emit(f"Файлов для обработки: {len(items)}")
+
+        # Проверка существования всех исходных файлов ДО обработки
+        for key, value in items:
+            parts = [p.strip() for p in value.split("|")]
+            if len(parts) < 4:
+                self.update_status.emit(f"Недопустимая строка в setup.ini: {key} = {value}")
+                self.done.emit()
+                return
+            path = parts[0]
+            if not os.path.isfile(path):
+                self.update_status.emit(f"Файл не найден: {path}")
+                self.done.emit()
+                return
+
         if not items:
             self.update_status.emit("Нет заданий для обработки.")
             self.done.emit()
@@ -53,13 +118,10 @@ class ConvertWorker(QThread):
         total = len(items)
         merged_created = False
 
-        # Инициализация PDF-конвертера КОМПАС
         iConverter = None
         try:
-            import pythoncom
-            from win32com.client import Dispatch, gencache
             pythoncom.CoInitialize()
-
+            from win32com.client import Dispatch, gencache
             kompas_api5 = gencache.EnsureModule("{0422828C-F174-495E-AC5D-D31014DBBE87}", 0, 1, 0)
             kompas_object = kompas_api5.KompasObject(
                 Dispatch("Kompas.Application.5")._oleobj_.QueryInterface(
@@ -82,6 +144,8 @@ class ConvertWorker(QThread):
                 continue
 
             path, sheet, enabled, merge = parts
+#            self.update_status.emit(f"Файл: {path}, enabled={enabled}, merge={merge}")
+
             if enabled.lower() != "enabled":
                 continue
 
@@ -116,14 +180,16 @@ class ConvertWorker(QThread):
             except Exception as e:
                 self.update_status.emit(f"Ошибка при обработке: {e}")
 
+#            sleep(2)
+
             processed += 1
             percent = int((processed / total) * 100)
             self.update_progress.emit(percent)
             sleep(0.5)
 
-        # Объединение PDF-файлов
-        merged_created = False
-        merged_pdf_path = config.get(project_name, "merged_pdf_path", fallback=None)
+            merged_pdf_path = section.get("merged_pdf_path", "").strip()
+
+            self.update_status.emit(f"Файлы для объединения: {merged_list}")
 
         if merged_list and merged_pdf_path:
             try:
@@ -133,25 +199,23 @@ class ConvertWorker(QThread):
                         merger.append(pdf_file)
                 merger.write(merged_pdf_path)
                 merger.close()
-                self.update_status.emit(f"{os.path.basename(merged_pdf_path)} успешно сохранён.")
+                self.update_status.emit(f"{os.path.basename(merged_pdf_path)} сохранён.")
                 merged_created = True
             except Exception as e:
                 self.update_status.emit(f"Ошибка при объединении PDF: {e}")
         else:
             self.update_status.emit("Объединение PDF не требуется.")
 
-        # ⏱ Добавим задержку, чтобы сообщение об объединении отобразилось
         if merged_created:
-            sleep(1)        #   Спим 1 секунду
+            sleep(1.5)
 
         if config.get(project_name, "add_page_numbers", fallback="no").lower() == "yes":
             start_page = 3 if config.get(project_name, "start_from_page3", fallback="no").lower() == "yes" else 1
             skip_pages = 2 if start_page == 3 else 0
             try:
+                self.update_status.emit(f"Вызов нумерации: start={start_page}, skip={skip_pages}")
                 add_page_numbers(merged_pdf_path, merged_pdf_path, start=start_page, skip=skip_pages)
-                self.update_status.emit("Добавлены номера страниц.")
-                sleep(1)        #   Спим 1 секунду
-
+                self.update_status.emit(f"Добавлены номера страниц (с {start_page}-го).")
             except Exception as e:
                 self.update_status.emit(f"Ошибка нумерации PDF: {e}")
 
@@ -160,7 +224,8 @@ class ConvertWorker(QThread):
         self.update_progress.emit(100)
         self.done.emit()
 
-    def try_remove_existing(self, path):
+    def try_remove_existing(self, path):       # Удаляет файл, если он существует, и логирует ошибку при неудаче.
+
         if os.path.isfile(path):
             try:
                 os.remove(path)
@@ -206,4 +271,3 @@ class ConvertWorker(QThread):
     def copy_pdf(self, input_path, output_path):
         self.try_remove_existing(output_path)
         shutil.copyfile(input_path, output_path)
-
