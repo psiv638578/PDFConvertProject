@@ -46,11 +46,24 @@ class MainGui(QMainWindow):
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout()
 
-        # Метка текущего проекта — ВВЕРХУ
-        project_name = self.config.get("global", "current_project", fallback="не выбран")
-        self.project_label = QLabel(f"Текущий проект: {project_name}")
-        layout.addWidget(self.project_label)
+        # Загружаем имя текущего проекта
+        project_name = self.config.get("global", "current_project", fallback="(не задан)")
 
+        # Метка и кнопка "Изменить..."
+        self.project_label = QLabel(f"Текущий проект: {project_name}")
+        self.project_button = QPushButton("Изменить...")
+        self.project_button.clicked.connect(self.open_project_dialog)
+
+        # Горизонтальное размещение project_label + кнопка
+        project_layout = QHBoxLayout()
+        project_layout.addWidget(self.project_label)
+        project_layout.addWidget(self.project_button)
+        project_layout.setContentsMargins(0, 0, 0, 20)  # left, top, right, bottom
+
+        # Основной layout
+        layout = QVBoxLayout()
+        layout.addLayout(project_layout)
+        
         # Кнопки
         btn_layout = QHBoxLayout()
         btn_start = QPushButton("Конвертировать")
@@ -79,7 +92,11 @@ class MainGui(QMainWindow):
                 min-height: 19px;
             }
         """) 
+        
+        # Завершаем: создаем центральный виджет и задаем layout
+        central_widget = QWidget()
         central_widget.setLayout(layout)
+        self.setCentralWidget(central_widget)
 
     def reset_progress_style_to_background(self):
         bg_color = self.palette().color(self.backgroundRole()).name()
@@ -141,18 +158,23 @@ class MainGui(QMainWindow):
 
     def open_project_dialog(self):
         dlg = ProjectSelectDialog(self)
+        selected_project = None  # ← инициализация по умолчанию
         if dlg.exec_():
             selected_project = dlg.get_selected_project()
-            if selected_project:
-                self.config.set("global", "current_project", selected_project)
-                with open(self.ini_path, "w", encoding="utf-8") as configfile:
-                    self.config.write(configfile)
+        if selected_project:
+            # 🔥 перечитываем setup.ini, чтобы сохранить свежие изменения (например, новую секцию)
+            self.config.read(self.ini_path, encoding="utf-8")
+
+            self.config.set("global", "current_project", selected_project)
+            with open(self.ini_path, "w", encoding="utf-8") as configfile:
+                self.config.write(configfile)
+
                 self.status.showMessage(f"Проект переключён: {selected_project}", 5000)
                 self.project_label.setText(f"Текущий проект: {selected_project}")
                 self.config.read(self.ini_path, encoding="utf-8")
 
     def open_task_list_dialog(self):
-        dlg = TaskListDialog(self)
+        dlg = TaskListDialog(self, self.config)
         dlg.exec_()
 
     def open_excel_sheets_dialog(self):

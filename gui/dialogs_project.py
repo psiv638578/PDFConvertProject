@@ -39,7 +39,7 @@ class ProjectSelectDialog(QDialog):
         btn_create.clicked.connect(self.create_project)
         btn_delete.clicked.connect(self.delete_project)
         btn_select.clicked.connect(self.accept_project)
-        btn_ok.clicked.connect(self.accept)
+        btn_ok.clicked.connect(self.accept_project)
         btn_cancel.clicked.connect(self.reject)
 
         # Layout
@@ -102,12 +102,15 @@ class ProjectSelectDialog(QDialog):
                 sheets = parts[1] if len(parts) > 1 else "-"
                 enabled = parts[2].lower() == "enabled" if len(parts) > 2 else True
                 merge = parts[3].lower() == "merge" if len(parts) > 3 else True
-                summary.append(f"Файл: {os.path.basename(filepath)}")
+                summary.append(f"Файл: {filepath}")
         if file_counter == 0:
             summary.append("\nНет файлов в проекте.")
         self.details_label.setText("\n".join(summary))
 
     def create_project(self):
+        # Перечитать setup.ini, чтобы иметь актуальные данные
+        self.config.read(self.ini_path, encoding="utf-8")
+
         name, ok = QInputDialog.getText(self, "Новый проект", "Введите имя проекта:")
         if not ok or not name.strip():
             return
@@ -115,33 +118,52 @@ class ProjectSelectDialog(QDialog):
         if self.config.has_section(name):
             QMessageBox.warning(self, "Ошибка", "Проект с таким именем уже существует.")
             return
+
+        # Добавляем новую секцию
         self.config.add_section(name)
+
+        # Пример начальных значений
+        self.config.set(name, "output_folder", "D:/Temp/pdf")
+        self.config.set(name, "merged_pdf_path", f"D:/Temp/pdf/{name}.pdf")
+
+        # Обязательно перезаписать с учётом всех секций
+        with open(self.ini_path, "w", encoding="utf-8") as configfile:
+            self.config.write(configfile)
+
+        # Обновляем список проектов
         self.project_list.addItem(name)
+        
+#        print("setup.ini записан в:", os.path.abspath(self.ini_path))
 
     def delete_project(self):
         item = self.project_list.currentItem()
         if not item:
             return
         name = item.text()
-        confirm = QMessageBox.question(self, "Удалить проект",
-                                       f"Удалить проект '{name}'?",
-                                       QMessageBox.Yes | QMessageBox.No)
-        if confirm == QMessageBox.Yes:
+        if QMessageBox.question(self, "Удалить", f"Удалить проект {name}?", 
+                                QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
             self.config.remove_section(name)
             self.project_list.takeItem(self.project_list.row(item))
-            self.details_label.setText("")
+
+            with open(self.ini_path, "w", encoding="utf-8") as configfile:
+                self.config.write(configfile)
 
     def accept_project(self):
         if not self.current_selection:
             QMessageBox.warning(self, "Нет выбора", "Выберите проект.")
             return
+
         if not self.config.has_section("global"):
             self.config.add_section("global")
+
         self.config.set("global", "current_project", self.current_selection)
+
+        # !!! ДО ЗАПИСИ — выведем всё содержимое
         with open(self.ini_path, "w", encoding="utf-8") as f:
             self.config.write(f)
-        self.accept()
 
+        self.accept()
+        
     def get_selected_project(self):
         return self.project_list.currentItem().text() if self.project_list.currentItem() else None
 

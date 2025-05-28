@@ -122,3 +122,12 @@ class ExcelSheetsDialog(QDialog):
             self.config.write(f)
 
         self.accept()
+        
+    def get_selected_sheets(self):
+        selected = []
+        for i in range(self.sheet_list.count()):
+            item = self.sheet_list.item(i)
+            if item.checkState() == Qt.Checked:
+                selected.append(item.text())
+        return selected
+    

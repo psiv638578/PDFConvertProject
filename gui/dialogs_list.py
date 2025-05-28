@@ -1,14 +1,19 @@
-from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, QCheckBox,
+﻿from PyQt5.QtWidgets import (
+    QWidget, QDialog, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, QCheckBox,
     QTableWidget, QTableWidgetItem, QAbstractItemView, QHeaderView
 )
 from PyQt5.QtCore import Qt
 import configparser
 import os
+from gui.dialogs_excel import ExcelSheetsDialog
 
 class TaskListDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, config=None):
         super().__init__(parent)
+        self.config = config
+        self.ini_path = os.path.join(os.path.dirname(__file__), "..", "setup.ini")
+        self.project_name = self.config.get("global", "current_project", fallback=None)
+
         self.setWindowTitle("Список заданий")
         self.setMinimumSize(600, 400)
 
@@ -19,7 +24,7 @@ class TaskListDialog(QDialog):
         layout = QVBoxLayout()
 
         self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["Файл", "Параметры", "Статус", "Объединять"])
+        self.table.setHorizontalHeaderLabels(["Файл", "Листы", "Обрабатывать", "Объединять"])
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
@@ -99,7 +104,45 @@ class TaskListDialog(QDialog):
             self.table.insertRow(row)
             self.source_paths.append(path)
             self.table.setItem(row, 0, QTableWidgetItem(os.path.basename(path)))
-            self.table.setItem(row, 1, QTableWidgetItem(param))
+
+            display_param = "Все" if param == "-" or param.lower() == "all" else param
+        
+
+            if path.lower().endswith(".xlsx"):
+                from PyQt5.QtWidgets import QWidget, QLabel, QHBoxLayout
+
+                # Преобразуем параметр
+                param = parts[1].strip()
+                display_param = "Все" if param in ["-", "all"] else "Выборочно"
+
+                # # Виджет с лейблом и кнопкой
+                # cell_widget = QWidget()
+                # layout = QHBoxLayout(cell_widget)
+                # layout.setContentsMargins(0, 0, 0, 0)
+
+                # label = QLabel(display_param)
+                # label.setAlignment(Qt.AlignCenter)
+                # layout.addWidget(label)
+
+                # # Кнопка "..."
+                # btn = QPushButton("...")
+                # btn.setFixedSize(25, 22)
+                # btn.setProperty("row", row)
+
+                # # ВНИМАНИЕ: используем parts[0].strip() вместо file_path
+                # actual_file_path = parts[0].strip()
+                # btn.clicked.connect(lambda _, f=actual_file_path, item=label: self.open_excel_sheet_dialog(f, item))
+                # layout.addWidget(btn)
+
+                # layout.addStretch()
+                # self.table.setCellWidget(row, 1, cell_widget)
+
+                # Сохраняем текст в скрытую структуру
+                hidden = QTableWidgetItem(display_param)
+                hidden.setFlags(Qt.ItemIsEnabled)
+                self.table.setItem(row, 1, hidden)
+            else:
+                self.table.setItem(row, 1, QTableWidgetItem(display_param))
 
             chk_status = QTableWidgetItem()
             chk_status.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
@@ -131,7 +174,8 @@ class TaskListDialog(QDialog):
 
         for row in range(self.table.rowCount()):
             path = self.source_paths[row] if row < len(self.source_paths) else ""
-            param = self.table.item(row, 1).text()
+            param_raw = self.table.item(row, 1).text().strip()
+            param = "all" if param_raw.lower() == "все" else param_raw
             status_item = self.table.item(row, 2)
             merge_item = self.table.item(row, 3)
 
@@ -144,3 +188,57 @@ class TaskListDialog(QDialog):
             config.write(f)
 
         self.accept()
+        
+    # def open_excel_sheet_dialog(self):
+    #     sender = self.sender()
+    #     if not sender:
+    #         return
+
+    #     row = sender.property("row")
+    #     if row is None:
+    #         return
+
+    #     file_path = self.source_paths[row]
+    #     if not os.path.exists(file_path):
+    #         QMessageBox.warning(self, "Файл не найден", f"Файл не найден:\n{file_path}")
+    #         return
+
+    #     dlg = ExcelSheetsDialog(self)
+
+    #     if dlg.exec_():
+    #         selected_sheets = dlg.get_selected_sheets()  # Предполагается, что метод реализован
+    #         if selected_sheets:
+    #             text = ", ".join(str(i + 1) for i in range(len(selected_sheets)))
+    #         else:
+    #             text = "Все"
+
+    #         self.table.item(row, 1).setText(text)
+
+    #         # Обновляем текст в ячейке QLabel, если она есть
+    #         container = self.table.cellWidget(row, 1)
+    #         if container:
+    #             label = container.findChild(QLabel)
+    #             if label:
+    #                 label.setText(text)
+    #                 label.setToolTip(", ".join(selected_sheets))  # ← можно оставить как подсказку с оригинальными именами
+
+    # def open_excel_sheet_dialog(self, file_path, table_item):
+    #     # Открываем существующий диалог (все .xlsx сразу)
+    #     dlg = ExcelSheetsDialog(self.config, self)
+    #     dlg.exec_()
+
+    #     # После закрытия — получаем новое значение из конфига
+    #     project = self.project_name
+    #     if not self.config.has_section(project):
+    #         return
+
+    #     # Найти нужную строку в setup.ini по имени файла
+    #     for key in self.config.options(project):
+    #         if key.startswith("source_files_"):
+    #             value = self.config.get(project, key)
+    #             parts = value.split("|")
+    #             if parts and parts[0].strip() == file_path:
+    #                 param = parts[1].strip()
+    #                 display = "Все" if param in ["-", "all"] else "Выборочно"
+    #                 table_item.setText(display)
+    #                 break
