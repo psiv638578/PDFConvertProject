@@ -2,6 +2,7 @@
 
 import os
 import configparser
+import webbrowser
 from PyQt5.QtWidgets import (
     QApplication,
 	QMainWindow,
@@ -16,7 +17,7 @@ from PyQt5.QtWidgets import (
 	QMenuBar, 
     QLabel
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSlot
 from gui.dialogs_project import ProjectSelectDialog
 from gui.dialogs_list import TaskListDialog
 from gui.dialogs_excel import ExcelSheetsDialog
@@ -26,6 +27,52 @@ from gui.dialogs_page_numbering import PageNumberingDialog
 class MainGui(QMainWindow):
     def __init__(self):
         super().__init__()
+
+        # Проверка setup.ini
+        ini_path = os.path.join(os.getcwd(), "setup.ini")
+        config = configparser.ConfigParser()
+        config.optionxform = str  # сохранить регистр ключей
+
+        ini_needs_creation = False
+        ini_needs_fixing = False
+
+        if not os.path.exists(ini_path):
+            ini_needs_creation = True
+        else:
+            try:
+                config.read(ini_path, encoding='utf-8')
+                if "global" not in config or "current_project" not in config["global"]:
+                    ini_needs_fixing = True
+                else:
+                    current_project = config.get("global", "current_project", fallback=None)
+                    if current_project and current_project not in config:
+                        ini_needs_fixing = True
+            except Exception:
+                ini_needs_fixing = True
+
+        if ini_needs_creation:
+            # Создаем новый setup.ini
+            with open(ini_path, "w", encoding="utf-8") as f:
+                f.write("[global]\ncurrent_project = Проект1\n\n[Проект1]\n")
+            QMessageBox.information(self, "Отсутствует setup.ini",
+                "Файл с настройками (setup.ini) не найден.\n"
+                "Создан пустой файл-заготовка.\n\n"
+                "Для дальнейшей работы необходимо:\n- выбрать исходные файлы;\n"
+                "- указать папку для сохранения PDF;\n"
+                "- задать имя объединённого файла (при необходимости).")
+
+        elif ini_needs_fixing:
+            with open(ini_path, "a", encoding="utf-8") as f:
+                f.write("\n" + "-"*20 + "\n[global]\ncurrent_project = Проект1\n\n[Проект1]\n")
+            QMessageBox.information(self, "Некорректный setup.ini",
+                "Файл с настройками (setup.ini) имеет неправильную структуру.\n"
+                "Он был дополнен необходимыми секциями.\n\n"
+                "Для дальнейшей работы необходимо:\n- выбрать исходные файлы;\n"
+                "- указать папку для сохранения PDF;\n"
+                "- задать имя объединённого файла (при необходимости).")
+
+
+
         self.setWindowTitle("PDFConvert v1.2-beta")
         self.setMinimumSize(300, 150)
 
@@ -148,7 +195,6 @@ class MainGui(QMainWindow):
         help_menu.addAction("Руководство пользователя", self.open_manual)
         help_menu.addAction("О программе", self.open_about)
 
-
     def get_project_config(self):
         project_name = self.config.get("global", "current_project", fallback=None)
         if not project_name or not self.config.has_section(project_name):
@@ -169,7 +215,7 @@ class MainGui(QMainWindow):
             with open(self.ini_path, "w", encoding="utf-8") as configfile:
                 self.config.write(configfile)
 
-                self.status.showMessage(f"Проект переключён: {selected_project}", 5000)
+                self.status.showMessage(f"Проект переключён: {selected_project}", 1000)
                 self.project_label.setText(f"Текущий проект: {selected_project}")
                 self.config.read(self.ini_path, encoding="utf-8")
 
@@ -255,15 +301,13 @@ class MainGui(QMainWindow):
                 config.write(f)
             self.status.showMessage("Имя итогового PDF обновлено")
 
+
     def open_manual(self):
-        try:
-            path = os.path.join(os.path.dirname(__file__), "..", "manual.txt")
-            if os.path.exists(path):
-                with open(path, "r", encoding="utf-8") as f:
-                    text = f.read()
-                QMessageBox.information(self, "Руководство пользователя", text)
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка", str(e))
+        manual_path = os.path.abspath("manual.html")
+        if os.path.exists(manual_path):
+            webbrowser.open(f"file:///{manual_path}")
+        else:
+            QMessageBox.warning(self, "Ошибка", "Файл manual.html не найден.")
 
     def open_about(self):
         try:
@@ -291,13 +335,14 @@ class MainGui(QMainWindow):
         self.worker.update_progress.connect(self.progress.setValue)
         self.worker.done.connect(self.conversion_finished)
         self.worker.show_info.connect(self.show_info_dialog)
+        self.worker.show_blocking_dialog.connect(self.show_blocked_file_message)
 
         self.worker.start()
 
     def conversion_finished(self):
         self.progress.setValue(0)
         self.progress.setTextVisible(False)
-        self.status.showMessage("Конвертация завершена", 3000)
+        self.status.showMessage("Конвертация завершена", 2000)
         self.reset_progress_style_to_background()
         self.progress.setTextVisible(False)
         self.progress.setValue(0)
@@ -308,7 +353,7 @@ class MainGui(QMainWindow):
             filename = text.replace("[BLOCKED] ", "")
             QMessageBox.critical(self, "Ошибка доступа", f"Файл «{filename}» заблокирован!\nВозможно, он открыт в другой программе.")
         else:
-            self.status.showMessage(text, 5000)
+            self.status.showMessage(text, 3000)
 
     def open_page_numbering_dialog(self):
         from gui.dialogs_page_numbering import PageNumberingDialog
@@ -318,8 +363,22 @@ class MainGui(QMainWindow):
     def show_info_dialog(self, text):
         QMessageBox.information(self, "Информация", text)
 
+    @pyqtSlot(str, int)
+    def handle_status_message(self, text, duration):
+        if text.startswith("[BLOCKED]"):
+            filename = text.replace("[BLOCKED] ", "")
+            QMessageBox.critical(self, "Ошибка доступа", f"Файл «{filename}» заблокирован!\nВозможно, он открыт в другой программе.")
+        else:
+            self.status.showMessage(text, duration)
+
+    @pyqtSlot(str)
+    def show_blocked_file_message(self, message):
+        QMessageBox.critical(self, "Файлы заблокированы", message)
+        QApplication.quit()
+
 def run_gui():
     app = QApplication([])
     gui = MainGui()
     gui.show()
     app.exec_()
+

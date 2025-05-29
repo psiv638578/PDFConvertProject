@@ -8,6 +8,9 @@ import os
 from gui.dialogs_excel import ExcelSheetsDialog
 
 class TaskListDialog(QDialog):
+    MERGE_COLUMN_INDEX = 3
+    PROCESS_COLUMN_INDEX = 2
+
     def __init__(self, parent=None, config=None):
         super().__init__(parent)
         self.config = config
@@ -38,6 +41,11 @@ class TaskListDialog(QDialog):
         self.btn_ok = QPushButton("OK")
         self.btn_cancel = QPushButton("Отмена")
 
+        self.btn_up.clicked.connect(self.move_row_up)
+        self.btn_down.clicked.connect(self.move_row_down)
+        self.btn_delete.clicked.connect(self.delete_selected_row)
+
+
         btn_layout.addWidget(self.btn_up)
         btn_layout.addWidget(self.btn_down)
         btn_layout.addWidget(self.btn_delete)
@@ -63,13 +71,28 @@ class TaskListDialog(QDialog):
         self.btn_cancel.clicked.connect(self.reject)
 
     def update_checkbox_state(self):
+        self.table.blockSignals(True)  # 🔒 Отключаем сигналы
+
         has_merge = False
         for row in range(self.table.rowCount()):
-            item = self.table.item(row, 3)
-            if item and item.checkState() == Qt.Checked:
-                has_merge = True
-                break
+            process_item = self.table.item(row, self.PROCESS_COLUMN_INDEX)
+            merge_item = self.table.item(row, self.MERGE_COLUMN_INDEX)
 
+            if process_item and merge_item:
+                # 🔄 Обновление доступности чекбокса "Объединять"
+                if process_item.checkState() == Qt.Checked:
+                    merge_item.setFlags(merge_item.flags() | Qt.ItemIsEnabled)
+                else:
+                    merge_item.setFlags(merge_item.flags() & ~Qt.ItemIsEnabled)
+
+                # 🔍 Проверка хотя бы одного активного merge-флага
+                if merge_item.flags() & Qt.ItemIsEnabled and merge_item.checkState() == Qt.Checked:
+                    has_merge = True
+
+        self.table.blockSignals(False)  # 🔓 Включаем обратно
+        self.table.viewport().update()
+
+        # 🔁 Обновляем доступность внешних чекбоксов
         self.cb_numbering.setEnabled(has_merge)
         self.cb_from_third.setEnabled(self.cb_numbering.isChecked() and self.cb_numbering.isEnabled())
 
@@ -103,7 +126,9 @@ class TaskListDialog(QDialog):
             row = self.table.rowCount()
             self.table.insertRow(row)
             self.source_paths.append(path)
-            self.table.setItem(row, 0, QTableWidgetItem(os.path.basename(path)))
+            file_item = QTableWidgetItem(os.path.basename(path))
+            file_item.setData(Qt.UserRole, path)  # сохраняем путь
+            self.table.setItem(row, 0, file_item)
 
             display_param = "Все" if param == "-" or param.lower() == "all" else param
         
@@ -114,28 +139,6 @@ class TaskListDialog(QDialog):
                 # Преобразуем параметр
                 param = parts[1].strip()
                 display_param = "Все" if param in ["-", "all"] else "Выборочно"
-
-                # # Виджет с лейблом и кнопкой
-                # cell_widget = QWidget()
-                # layout = QHBoxLayout(cell_widget)
-                # layout.setContentsMargins(0, 0, 0, 0)
-
-                # label = QLabel(display_param)
-                # label.setAlignment(Qt.AlignCenter)
-                # layout.addWidget(label)
-
-                # # Кнопка "..."
-                # btn = QPushButton("...")
-                # btn.setFixedSize(25, 22)
-                # btn.setProperty("row", row)
-
-                # # ВНИМАНИЕ: используем parts[0].strip() вместо file_path
-                # actual_file_path = parts[0].strip()
-                # btn.clicked.connect(lambda _, f=actual_file_path, item=label: self.open_excel_sheet_dialog(f, item))
-                # layout.addWidget(btn)
-
-                # layout.addStretch()
-                # self.table.setCellWidget(row, 1, cell_widget)
 
                 # Сохраняем текст в скрытую структуру
                 hidden = QTableWidgetItem(display_param)
@@ -169,76 +172,106 @@ class TaskListDialog(QDialog):
         if not config.has_section(section):
             config.add_section(section)
 
+        # Записываем флаги нумерации
         config.set(section, "add_page_numbers", "yes" if self.result_numbering else "no")
         config.set(section, "start_from_page3", "yes" if self.result_skip_first_two else "no")
 
+        # Удаляем старые записи source_files_
+        keys_to_remove = [k for k in config[section] if k.startswith("source_files_")]
+        for key in keys_to_remove:
+            config.remove_option(section, key)
+
+        # Сохраняем только видимые строки из таблицы
+        file_index = 1
         for row in range(self.table.rowCount()):
-            path = self.source_paths[row] if row < len(self.source_paths) else ""
-            param_raw = self.table.item(row, 1).text().strip()
-            param = "all" if param_raw.lower() == "все" else param_raw
+            file_item = self.table.item(row, 0)
+            param_item = self.table.item(row, 1)
             status_item = self.table.item(row, 2)
             merge_item = self.table.item(row, 3)
 
-            status = "enabled" if status_item.checkState() == Qt.Checked else "disabled"
-            merge = "merge" if merge_item.checkState() == Qt.Checked else "merge not"
+            # Проверка на наличие обязательных данных
+            if not file_item:
+                continue
 
-            config.set(section, f"source_files_{row + 1}", f"{path} | {param} | {status} | {merge}")
+            # path = file_item.text().strip()
+            path = file_item.data(Qt.UserRole) or file_item.text().strip()
 
+            if not path:
+                continue  # Пропускаем пустые строки
+
+            param_raw = param_item.text().strip() if param_item else "-"
+            param = "all" if param_raw.lower() == "все" else param_raw
+
+            status = "enabled" if status_item and status_item.checkState() == Qt.Checked else "disabled"
+            merge = "merge" if merge_item and merge_item.checkState() == Qt.Checked else "merge not"
+
+            config.set(section, f"source_files_{file_index}", f"{path} | {param} | {status} | {merge}")
+            file_index += 1
+
+        # Сохраняем результат
         with open(ini_path, "w", encoding='utf-8') as f:
             config.write(f)
 
         self.accept()
         
-    # def open_excel_sheet_dialog(self):
-    #     sender = self.sender()
-    #     if not sender:
-    #         return
+    # Обработчик изменения чекбокса "Обрабатывать"
+    def on_process_checkbox_changed(self, state, row):
+        merge_item = self.table.item(row, self.MERGE_COLUMN_INDEX)
+        if merge_item:
+            flags = merge_item.flags()
+            if state == Qt.Checked:
+                merge_item.setFlags(flags | Qt.ItemIsEnabled)
+            else:
+                merge_item.setFlags(flags & ~Qt.ItemIsEnabled)
+            self.table.viewport().update()  # Принудительно перерисовать таблицу
 
-    #     row = sender.property("row")
-    #     if row is None:
-    #         return
+    def delete_selected_row(self):
+        row = self.table.currentRow()
+        if row >= 0:
+            self.table.removeRow(row)
 
-    #     file_path = self.source_paths[row]
-    #     if not os.path.exists(file_path):
-    #         QMessageBox.warning(self, "Файл не найден", f"Файл не найден:\n{file_path}")
-    #         return
+            # Удалить путь из списка source_paths
+            if row < len(self.source_paths):
+                del self.source_paths[row]
 
-    #     dlg = ExcelSheetsDialog(self)
+            # Принудительно обновить состояние чекбоксов нумерации
+            self.update_checkbox_state()
 
-    #     if dlg.exec_():
-    #         selected_sheets = dlg.get_selected_sheets()  # Предполагается, что метод реализован
-    #         if selected_sheets:
-    #             text = ", ".join(str(i + 1) for i in range(len(selected_sheets)))
-    #         else:
-    #             text = "Все"
+    def move_row_up(self):
+        row = self.table.currentRow()
+        if row > 0:
+            self.swap_rows(row, row - 1)
+            self.table.selectRow(row - 1)
 
-    #         self.table.item(row, 1).setText(text)
+    def move_row_down(self):
+        row = self.table.currentRow()
+        if row < self.table.rowCount() - 1:
+            self.swap_rows(row, row + 1)
+            self.table.selectRow(row + 1)
 
-    #         # Обновляем текст в ячейке QLabel, если она есть
-    #         container = self.table.cellWidget(row, 1)
-    #         if container:
-    #             label = container.findChild(QLabel)
-    #             if label:
-    #                 label.setText(text)
-    #                 label.setToolTip(", ".join(selected_sheets))  # ← можно оставить как подсказку с оригинальными именами
+    def swap_rows(self, row1, row2):
+        for col in range(self.table.columnCount()):
+            item1 = self.table.item(row1, col)
+            item2 = self.table.item(row2, col)
 
-    # def open_excel_sheet_dialog(self, file_path, table_item):
-    #     # Открываем существующий диалог (все .xlsx сразу)
-    #     dlg = ExcelSheetsDialog(self.config, self)
-    #     dlg.exec_()
+            # Создание новых ячеек
+            new_item1 = QTableWidgetItem(item2.text() if item2 else "")
+            new_item2 = QTableWidgetItem(item1.text() if item1 else "")
 
-    #     # После закрытия — получаем новое значение из конфига
-    #     project = self.project_name
-    #     if not self.config.has_section(project):
-    #         return
+            # Если столбец содержит чекбокс (Обрабатывать или Объединять)
+            if col in (self.PROCESS_COLUMN_INDEX, self.MERGE_COLUMN_INDEX):
+                new_item1.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+                new_item1.setCheckState(item2.checkState() if item2 else Qt.Unchecked)
 
-    #     # Найти нужную строку в setup.ini по имени файла
-    #     for key in self.config.options(project):
-    #         if key.startswith("source_files_"):
-    #             value = self.config.get(project, key)
-    #             parts = value.split("|")
-    #             if parts and parts[0].strip() == file_path:
-    #                 param = parts[1].strip()
-    #                 display = "Все" if param in ["-", "all"] else "Выборочно"
-    #                 table_item.setText(display)
-    #                 break
+                new_item2.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+                new_item2.setCheckState(item1.checkState() if item1 else Qt.Unchecked)
+            else:
+                new_item1.setFlags(Qt.ItemIsEnabled)
+                new_item2.setFlags(Qt.ItemIsEnabled)
+
+            self.table.setItem(row1, col, new_item1)
+            self.table.setItem(row2, col, new_item2)
+
+        # Переместить соответствующие пути файлов
+        if row1 < len(self.source_paths) and row2 < len(self.source_paths):
+            self.source_paths[row1], self.source_paths[row2] = self.source_paths[row2], self.source_paths[row1]

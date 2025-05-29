@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Руководство пользователя PDFConvertProject</title>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; margin: 40px; }
+        h1, h2 { color: #333; }
+        ul { padding-left: 20px; }
+        a { color: #0066cc; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+<h1>Руководство пользователя<br>PDFConvertProject</h1>
+
+<h2>Оглавление</h2>
+<ol>
+    <li><a href="#intro">Введение</a></li>
+    <li><a href="#install">Установка и запуск</a></li>
+    <li><a href="#interface">Интерфейс программы</a></li>
+    <li><a href="#projects">Работа с проектами</a></li>
+    <li><a href="#tasks">Список заданий</a></li>
+    <li><a href="#setup">Формат setup.ini</a></li>
+    <li><a href="#conversion">Конвертация и объединение</a></li>
+    <li><a href="#numbering">Нумерация страниц</a></li>
+    <li><a href="#faq">Частые вопросы</a></li>
+    <li><a href="#contact">Обратная связь</a></li>
+</ol>
+
+<h2 id="intro">1. Введение</h2>
+<p>PDFConvertProject — это утилита для автоматической конвертации документов Word (.docx), Excel (.xlsx), чертежей Компас-3D (.cdw), а также уже готовых PDF-файлов в единый объединённый PDF-документ. Поддерживается предварительная нумерация страниц, выбор листов Excel, настройка очередности файлов и многое другое.</p>
+
+<h2 id="install">2. Установка и запуск</h2>
+<ul>
+    <li>Требуется Python 3.13+</li>
+    <li>Необходимые приложения:
+        <ul>
+            <li>Microsoft Word и Excel (для .docx/.xlsx)</li>
+            <li>Компас-3D с API5 и Pdf2d.dll (для .cdw)</li>
+            <li>PDFCreator или аналогичный PDF-принтер (при необходимости)</li>
+        </ul>
+    </li>
+    <li>Для запуска используйте файл <code>main.py</code></li>
+</ul>
+
+<h2 id="interface">3. Интерфейс программы</h2>
+<p><strong>Главное окно:</strong></p>
+<ul>
+    <li>Кнопка запуска конвертации</li>
+    <li>Кнопка "Изменить текущий проект"</li>
+    <li>Строка статуса и индикатор выполнения</li>
+</ul>
+<p><strong>Меню:</strong></p>
+<ul>
+    <li><strong>Файл:</strong> выбор файлов, папок, имени итогового PDF</li>
+    <li><strong>Редактирование:</strong> список заданий, таблицы Excel</li>
+    <li><strong>Справка:</strong> руководство, информация о программе</li>
+</ul>
+
+<h2 id="projects">4. Работа с проектами</h2>
+<ul>
+    <li>Проекты описываются в <code>setup.ini</code></li>
+    <li>Каждый проект — это отдельная секция с уникальным именем</li>
+    <li>Текущий проект задаётся в секции <code>[global]</code> с параметром <code>current_project</code></li>
+</ul>
+
+<h2 id="tasks">5. Список заданий</h2>
+<ul>
+    <li>Файлы отображаются в таблице с колонками:
+        <ul>
+            <li>Файл</li>
+            <li>Листы (для Excel)</li>
+            <li>Обрабатывать (✓/✗)</li>
+            <li>Объединять (✓/✗)</li>
+        </ul>
+    </li>
+    <li>Управление:
+        <ul>
+            <li>Вверх / Вниз — изменение порядка</li>
+            <li>Удалить — исключение из списка</li>
+            <li>Флаги:
+                <ul>
+                    <li>Нумеровать страницы</li>
+                    <li>С третьего листа</li>
+                </ul>
+            </li>
+        </ul>
+    </li>
+</ul>
+
+<h2 id="setup">6. Формат файла setup.ini</h2>
+<p><strong>Пример:</strong></p>
+<pre><code>[project1]
+output_folder = D:/Temp/pdf
+merged_pdf_path = D:/Temp/pdf/Общий.pdf
+source_files_1 = D:/Док1.docx | - | enabled | merge
+source_files_2 = D:/Таблица.xlsx | Sheet1 | enabled | merge
+source_files_3 = D:/Чертеж.cdw | Лист1 | enabled | merge not</code></pre>
+<p><strong>Формат строки:</strong><br>
+<code>путь_к_файлу | листы | статус | объединение</code></p>
+
+<h2 id="conversion">7. Конвертация и объединение</h2>
+<ul>
+    <li>Запуск по нажатию соответствующей кнопки</li>
+    <li>Обрабатываются только файлы со статусом <code>enabled</code></li>
+    <li>В объединённый PDF включаются только файлы с флагом <code>merge</code></li>
+    <li>Промежуточные PDF сохраняются в папке <code>output_folder</code></li>
+</ul>
+
+<h2 id="numbering">8. Нумерация страниц</h2>
+<ul>
+    <li>Активируется при включении флага "Нумеровать"</li>
+    <li>Можно начать с 1-й или с 3-й страницы</li>
+    <li>Работает только для PDF на формате A4</li>
+</ul>
+
+<h2 id="faq">9. Частые вопросы</h2>
+<ul>
+    <li><strong>Ничего не происходит:</strong> проверьте, есть ли <code>enabled</code> файлы в проекте</li>
+    <li><strong>Не объединяются PDF:</strong> убедитесь, что задан <code>merged_pdf_path</code></li>
+    <li><strong>Excel не обрабатывается:</strong> не выбран ни один лист</li>
+</ul>
+
+<h2 id="contact">10. Обратная связь</h2>
+<ul>
+    <li><strong>Автор:</strong> (вставьте имя)</li>
+    <li><strong>GitHub:</strong> (вставьте ссылку на репозиторий)</li>
+    <li><strong>При обращении приложите:</strong> файл <code>setup.ini</code> и <code>message.log</code></li>
+</ul>
+
+</body>
+</html>
