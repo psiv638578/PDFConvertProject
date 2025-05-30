@@ -83,7 +83,7 @@ class MainGui(QMainWindow):
 
 
 
-        self.setWindowTitle("PDFConvert v1.2-beta")
+        self.setWindowTitle("PDFConvert v1.3-beta")
         self.setMinimumSize(300, 150)
 
         self.ini_path = os.path.join(os.path.dirname(__file__), "..", "setup.ini")
