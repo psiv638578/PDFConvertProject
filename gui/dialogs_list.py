@@ -52,6 +52,9 @@ class TaskListDialog(QDialog):
 
         self.cb_numbering = QCheckBox("Нумеровать")
         self.cb_from_third = QCheckBox("С 3 листа")
+
+        self.cb_from_third.setVisible(False)        # Временн, до решения проблемы
+
         btn_layout.addWidget(self.cb_numbering)
         btn_layout.addWidget(self.cb_from_third)
 
