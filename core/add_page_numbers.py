@@ -15,16 +15,7 @@ def add_page_numbers(input_pdf_path, output_pdf_path, start=1, skip=0):
     reader = PdfReader(input_pdf_path)
     writer = PdfWriter()
 
-    print("=== add_page_numbers ===")
-    print(f"input: {input_pdf_path}")
-    print(f"output: {output_pdf_path}")
-    print(f"start: {start}, skip: {skip}")
-    print(f"pages: {len(reader.pages)}")
-
-
     for i, page in enumerate(reader.pages):
-
-        print(f"Page {i}, skip={skip}")
 
         packet = io.BytesIO()
 
@@ -41,22 +32,15 @@ def add_page_numbers(input_pdf_path, output_pdf_path, start=1, skip=0):
         x = page_width - offset_x_mm * mm
         y = page_height - offset_y_mm * mm
 
-        # Добавляем номер страницы, если не пропускаем
-        if i >= skip:
-            number = str(start + i - skip)
-
-            print(f"Рисуем номер: {number}")
-
-            print(f"type(i)={type(i)}, type(skip)={type(skip)}")
-
+        # Добавляем номер страницы
+        if i < skip:
+            number = ""
             can.setFont("Helvetica-Oblique", 10)
             can.drawString(x, y, number)
-
-            print(f"==> drawString at x={x}, y={y}")
-
         else:
-            print("→ SKIPPED")
-
+            number = str(start + i - skip)
+            can.setFont("Helvetica-Oblique", 10)
+            can.drawString(x, y, number)
 
         # Завершаем работу с текущим холстом
         can.save()

@@ -28,14 +28,13 @@ class MainGui(QMainWindow):
     def __init__(self):
         super().__init__()
 
-
         # Проверка setup.ini
         ini_path = os.path.join(os.getcwd(), "setup.ini")
         config = configparser.ConfigParser()
         config.optionxform = str  # сохранить регистр ключей
 
         ini_needs_creation = False
-        ini_invalid_structure = False
+        ini_needs_fixing = False
 
         if not os.path.exists(ini_path):
             ini_needs_creation = True
@@ -43,21 +42,18 @@ class MainGui(QMainWindow):
             try:
                 config.read(ini_path, encoding='utf-8')
                 if "global" not in config or "current_project" not in config["global"]:
-                    ini_invalid_structure = True
+                    ini_needs_fixing = True
                 else:
                     current_project = config.get("global", "current_project", fallback=None)
                     if current_project and current_project not in config:
-                        ini_invalid_structure = True
+                        ini_needs_fixing = True
             except Exception:
-                ini_invalid_structure = True
-
-        # Создание нового файла-заготовки
-        def write_ini_template(path):
-            with open(path, "w", encoding="utf-8") as f:
-                f.write("[global]\ncurrent_project = Проект1\n\n[Проект1]\n")
+                ini_needs_fixing = True
 
         if ini_needs_creation:
-            write_ini_template(ini_path)
+            # Создаем новый setup.ini
+            with open(ini_path, "w", encoding="utf-8") as f:
+                f.write("[global]\ncurrent_project = Проект1\n\n[Проект1]\n")
             QMessageBox.information(self, "Отсутствует setup.ini",
                 "Файл с настройками (setup.ini) не найден.\n"
                 "Создан пустой файл-заготовка.\n\n"
@@ -65,21 +61,15 @@ class MainGui(QMainWindow):
                 "- указать папку для сохранения PDF;\n"
                 "- задать имя объединённого файла (при необходимости).")
 
-        elif ini_invalid_structure:
-            bad_path = os.path.join(os.getcwd(), "setup-bad.ini")
-            try:
-                os.replace(ini_path, bad_path)  # перезаписывает, если setup-bad.ini уже существует
-            except Exception:
-                pass  # не критично, если переименование не удалось
-
-        write_ini_template(ini_path)
-        QMessageBox.information(self, "Некорректный setup.ini",
-            "Файл с настройками (setup.ini) имеет неправильную структуру.\n"
-            "Он был переименован в setup-bad.ini.\n"
-            "Создан пустой файл-заготовка setup.ini.\n\n"
-            "Для дальнейшей работы необходимо:\n- выбрать исходные файлы;\n"
-            "- указать папку для сохранения PDF;\n"
-            "- задать имя объединённого файла (при необходимости).")
+        elif ini_needs_fixing:
+            with open(ini_path, "a", encoding="utf-8") as f:
+                f.write("\n" + "-"*20 + "\n[global]\ncurrent_project = Проект1\n\n[Проект1]\n")
+            QMessageBox.information(self, "Некорректный setup.ini",
+                "Файл с настройками (setup.ini) имеет неправильную структуру.\n"
+                "Он был дополнен необходимыми секциями.\n\n"
+                "Для дальнейшей работы необходимо:\n- выбрать исходные файлы;\n"
+                "- указать папку для сохранения PDF;\n"
+                "- задать имя объединённого файла (при необходимости).")
 
 
 
